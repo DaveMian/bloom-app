@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="#40E0D0"/>
+
+  <!-- Letter "b" centred -->
+  <text
+    x="256"
+    y="368"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="340"
+    font-weight="700"
+    fill="white"
+    text-anchor="middle"
+  >b</text>
+</svg>

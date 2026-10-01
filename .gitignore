@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js build output
+.next/
+out/
+
+# Capacitor & Native build caches
+build/
+DerivedData/
+*.xcarchive
+Payload/
+*.ipa
+
+# Environment & debug
+.env*.local
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
