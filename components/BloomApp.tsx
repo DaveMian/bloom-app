@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, ChevronLeft, ChevronRight, Circle, Clock3, Download, Droplets, Flower2, Heart, Layers3, Pause, Pencil, Play, Plus, RotateCcw, Settings2, SkipForward, Sparkles, Sun, Sunrise, Sunset, Target, Trash2, Upload, Volume2, X } from "lucide-react";
+import { Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, ChevronLeft, ChevronRight, Circle, Clock3, Download, Droplets, Heart, Layers3, Pause, Pencil, Play, Plus, RotateCcw, Settings2, SkipForward, Sparkles, Sun, Sunrise, Sunset, Target, Trash2, Upload, Volume2, X } from "lucide-react";
 import { addDays, BloomData, cloneSeed, countWeek, currentVersion, dateKey, getOccurrence, monday, migrateLocalData, Routine, scheduled, scheduledStreak, validateImport, weekday } from "@/lib/model";
 
 type View = "today" | "week" | "goals" | "progress" | "settings";
@@ -15,7 +15,7 @@ const nav: {id:View; label:string; icon: typeof Heart}[] = [
   {id:"settings",label:"Settings",icon:Settings2}
 ];
 const icons: Record<string, typeof Heart> = {
-  book:BookOpen, sparkle:Sparkles, phone:Clock3, heart:Heart, pencil:Pencil, language:BookOpen, drop:Flower2, droplets:Droplets, layers:Layers3, palette:Sparkles
+  book:BookOpen, sparkle:Sparkles, phone:Clock3, heart:Heart, pencil:Pencil, language:BookOpen, drop:Droplets, droplets:Droplets, layers:Layers3, palette:Sparkles
 };
 
 const niceDate = (key:string, options:Intl.DateTimeFormatOptions={weekday:"long",month:"long",day:"numeric"}) =>
@@ -557,14 +557,17 @@ export default function BloomApp(){
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><span>bloom<span className="brand-dot">.</span></span></div>
+      <div className="brand">
+        <div style={{width:"28px",height:"28px",borderRadius:"7px",background:"#40E0D0",display:"grid",placeItems:"center",color:"#fff",fontWeight:700,fontSize:"17px",lineHeight:1,boxShadow:"0 2px 8px rgba(64,224,208,0.35)",flexShrink:0}}>b</div>
+        <span>bloom<span className="brand-dot">.</span></span>
+      </div>
       <div className="side-kicker">YOUR SPACE TO GROW</div>
       <nav className="side-nav" aria-label="Main navigation">{nav.map(item=><button key={item.id} className={`nav-item ${view===item.id?"active":""}`} onClick={()=>setView(item.id)}><item.icon size={19} strokeWidth={1.8}/><span>{item.label}</span>{view===item.id&&<span className="nav-pip"/>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="sidebar-flower">✳</div><p>A little progress<br/>counts.</p><small>Continue at your pace.</small></div>
+      <div className="sidebar-bottom"><div className="sidebar-flower" style={{color:"#40E0D0"}}>✳</div><p>A little progress<br/>counts.</p><small>Continue at your pace.</small></div>
     </aside>
     <main className="main-content">
       <div className="topbar">
-        <span><Flower2 size={18}/> A gentle space for your days</span>
+        <span><Sparkles size={18} color="#40E0D0"/> A gentle space for your days</span>
         <div className="top-date-time">
           <span className="top-date-item"><CalendarDays size={15}/>{niceDate(today,{weekday:"short",month:"short",day:"numeric",year:"numeric"})}</span>
           <span className="top-sep">·</span>
@@ -607,7 +610,7 @@ export default function BloomApp(){
         {isFullDayComplete && (
           <div className="day-complete-card">
             <div className="bloom-flourish-icon">
-              <Flower2 size={25} />
+              <Sparkles size={25} color="#40E0D0"/>
             </div>
             <div className="day-complete-content">
               <SmallLabel>A GENTLE FLOURISH</SmallLabel>
