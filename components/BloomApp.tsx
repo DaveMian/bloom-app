@@ -99,18 +99,12 @@ function playDone(){
 
 let activeVibrateInterval: any = null;
 let capHaptics: any = null;
-let capLocalNotifications: any = null;
+const getCapLocalNotifications = () => (typeof window !== "undefined" ? (window as any).Capacitor?.Plugins?.LocalNotifications : null);
 
 if (typeof window !== "undefined") {
   import("@capacitor/haptics")
     .then((mod) => {
       capHaptics = mod.Haptics;
-    })
-    .catch(() => {});
-
-  import("@capacitor/local-notifications")
-    .then((mod) => {
-      capLocalNotifications = mod.LocalNotifications;
     })
     .catch(() => {});
 }
@@ -498,9 +492,10 @@ export default function BloomApp(){
     haptic(100);
 
     // 1. Native Capacitor Local Notifications (iOS / Android app)
-    if (capLocalNotifications) {
+    const capLocal = getCapLocalNotifications();
+    if (capLocal) {
       try {
-        await capLocalNotifications.schedule({
+        await capLocal.schedule({
           notifications: [
             {
               title,
@@ -545,9 +540,10 @@ export default function BloomApp(){
     if (typeof window === "undefined") return;
 
     // 1. Try Native Capacitor Local Notifications (iOS / Android native app)
-    if (capLocalNotifications) {
+    const capLocal = getCapLocalNotifications();
+    if (capLocal) {
       try {
-        const res = await capLocalNotifications.requestPermissions();
+        const res = await capLocal.requestPermissions();
         if (res.display === "granted") {
           update(d => {
             if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
