@@ -99,11 +99,18 @@ function playDone(){
 
 let activeVibrateInterval: any = null;
 let capHaptics: any = null;
+let capLocalNotifications: any = null;
 
 if (typeof window !== "undefined") {
   import("@capacitor/haptics")
     .then((mod) => {
       capHaptics = mod.Haptics;
+    })
+    .catch(() => {});
+
+  import("@capacitor/local-notifications")
+    .then((mod) => {
+      capLocalNotifications = mod.LocalNotifications;
     })
     .catch(() => {});
 }
@@ -388,8 +395,8 @@ export default function BloomApp(){
 
   // Gentle notifications & periodic hydration check
   useEffect(()=>{
-    if(!data.profile.notificationsEnabled || typeof window==="undefined" || !("Notification" in window) || Notification.permission!=="granted") return;
-    const intervalId=window.setInterval(()=>{
+    if(!data.profile.notificationsEnabled || typeof window==="undefined") return;
+    const checkHydration = () => {
       const curHour=new Date().getHours();
       if(curHour>=9 && curHour<=21){
         const todayKey=dateKey(new Date(),data.profile.timezone);
@@ -399,15 +406,13 @@ export default function BloomApp(){
           const intervalMs=(data.profile.waterReminderInterval||2)*60*60*1000;
           if(Date.now()-lastNotified>=intervalMs){
             localStorage.setItem("bloom-last-water-notif",String(Date.now()));
-            playDrop();
-            new Notification("Bloom · Gentle Sip Reminder",{
-              body:`You've logged ${waterCount} of 8 glasses today. Time for a refreshing sip! 💧`,
-              icon:"/icon-192.png"
-            });
+            showAppNotification("Bloom · Gentle Sip Reminder", `You've logged ${waterCount} of 8 glasses today. Time for a refreshing sip! 💧`);
           }
         }
       }
-    },15*60*1000);
+    };
+    checkHydration();
+    const intervalId=window.setInterval(checkHydration, 15*60*1000);
     return ()=>clearInterval(intervalId);
   },[data.profile.notificationsEnabled,data.profile.waterReminderInterval,data.profile.timezone,data.water]);
 
@@ -488,45 +493,122 @@ export default function BloomApp(){
     });
   };
 
-  const requestNotificationPermission = async () => {
-    if(typeof window==="undefined" || !("Notification" in window)){
-      setMessage("Notifications are not supported by this browser.");
-      return;
-    }
-    try{
-      const perm = await Notification.requestPermission();
-      if(perm==="granted"){
-        update(d=>{ if(!d.profile) d.profile={name:"",timezone:"Asia/Dubai",allowance:45}; d.profile.notificationsEnabled=true; return d; });
-        setMessage("Notifications enabled! You'll receive gentle sip reminders.");
-        new Notification("Bloom · Reminders Enabled",{
-          body:"Gentle hydration and routine check-ins are active 🌿",
-          icon:"/icon-192.png"
+  const showAppNotification = async (title: string, body: string) => {
+    playDrop();
+    haptic(100);
+
+    // 1. Native Capacitor Local Notifications (iOS / Android app)
+    if (capLocalNotifications) {
+      try {
+        await capLocalNotifications.schedule({
+          notifications: [
+            {
+              title,
+              body,
+              id: Math.floor(Math.random() * 100000) + 1,
+              schedule: { at: new Date(Date.now() + 200) }
+            }
+          ]
         });
-      }else{
-        update(d=>{ if(d.profile) d.profile.notificationsEnabled=false; return d; });
-        setMessage("Notification permission was denied in your browser settings.");
-      }
-    }catch{
-      setMessage("Could not request notification permissions.");
+        return;
+      } catch {}
+    }
+
+    // 2. Service Worker showNotification (iOS Safari PWA & modern browsers)
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        if (reg && reg.showNotification) {
+          await reg.showNotification(title, {
+            body,
+            icon: "/icon-192.png",
+            badge: "/icon-192.png"
+          });
+          return;
+        }
+      } catch {}
+    }
+
+    // 3. Window Notification (Desktop / standard web)
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification(title, {
+          body,
+          icon: "/icon-192.png"
+        });
+        return;
+      } catch {}
     }
   };
 
-  const sendTestNotification = () => {
-    if(typeof window==="undefined" || !("Notification" in window)){
-      setMessage("Notifications are not supported by this browser.");
-      return;
+  const requestNotificationPermission = async () => {
+    if (typeof window === "undefined") return;
+
+    // 1. Try Native Capacitor Local Notifications (iOS / Android native app)
+    if (capLocalNotifications) {
+      try {
+        const res = await capLocalNotifications.requestPermissions();
+        if (res.display === "granted") {
+          update(d => {
+            if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
+            d.profile.notificationsEnabled = true;
+            return d;
+          });
+          setMessage("Notifications enabled! You'll receive gentle sip reminders.");
+          showAppNotification("Bloom · Reminders Enabled", "Gentle hydration and routine check-ins are active 🌿");
+          return;
+        } else {
+          update(d => { if (d.profile) d.profile.notificationsEnabled = false; return d; });
+          setMessage("Notification permission was denied in your device Settings.");
+          return;
+        }
+      } catch {}
     }
-    if(Notification.permission!=="granted"){
-      requestNotificationPermission();
-      return;
+
+    // 2. Try Web Notifications (Browser / iOS PWA)
+    if ("Notification" in window) {
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm === "granted") {
+          update(d => {
+            if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
+            d.profile.notificationsEnabled = true;
+            return d;
+          });
+          setMessage("Notifications enabled! You'll receive gentle sip reminders.");
+          showAppNotification("Bloom · Reminders Enabled", "Gentle hydration and routine check-ins are active 🌿");
+          return;
+        } else {
+          update(d => { if (d.profile) d.profile.notificationsEnabled = false; return d; });
+          setMessage("Notification permission was denied in your browser settings.");
+          return;
+        }
+      } catch {}
     }
+
+    // 3. Fallback for iOS Safari (before adding to home screen)
+    update(d => {
+      if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
+      d.profile.notificationsEnabled = true;
+      return d;
+    });
     playDrop();
     haptic(100);
-    new Notification("Bloom · Hydration Reminder",{
-      body:"Take a gentle pause for a sip of water 💧 (Glass 4 of 8)",
-      icon:"/icon-192.png"
-    });
-    setMessage("Test notification sent!");
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIos) {
+      setMessage("Reminders enabled! Tip: On iPhone Safari, tap Share (⎋) → 'Add to Home Screen' to receive lock screen alerts.");
+    } else {
+      setMessage("In-app reminders enabled! Audio and haptic alerts will remind you to sip.");
+    }
+  };
+
+  const sendTestNotification = async () => {
+    if (!data.profile.notificationsEnabled) {
+      await requestNotificationPermission();
+      return;
+    }
+    showAppNotification("Bloom · Hydration Reminder", "Take a gentle pause for a sip of water 💧 (Glass 4 of 8)");
+    setMessage("Test reminder sent!");
   };
 
   const exportData = () => {
