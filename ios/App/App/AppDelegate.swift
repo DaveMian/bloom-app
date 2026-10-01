@@ -19,27 +19,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         completionHandler([.banner, .sound])
     }
 
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
-    }
-
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
-    }
-
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
-    }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
-    }
-
-    func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
-    }
+    func applicationWillResignActive(_ application: UIApplication) {}
+    func applicationDidEnterBackground(_ application: UIApplication) {}
+    func applicationWillEnterForeground(_ application: UIApplication) {}
+    func applicationDidBecomeActive(_ application: UIApplication) {}
+    func applicationWillTerminate(_ application: UIApplication) {}
 
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
@@ -52,7 +36,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 }
 
 final class BloomBridgeViewController: CAPBridgeViewController {
-    override open func capacitorDidLoad() {
+    override public func capacitorDidLoad() {
         bridge?.registerPluginInstance(BloomNativePlugin())
     }
 }
@@ -73,10 +57,10 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
     private let eveningId = "bloom-evening-summary"
     private let suiteName = "group.app.bloom.routine"
 
-    @objc func requestPermissions(_ call: CAPPluginCall) {
+    @objc override func requestPermissions(_ call: CAPPluginCall) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if let error = error {
-                call.reject("Could not request notification permission", nil, error)
+                call.reject("Could not request notification permission", "\(error.localizedDescription)", error)
                 return
             }
             call.resolve(["display": granted ? "granted" : "denied"])
@@ -84,11 +68,11 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func scheduleReminders(_ call: CAPPluginCall) {
-        let interval = max(1, min(6, call.getInt("intervalHours") ?? 2))
-        let startHour = max(0, min(23, call.getInt("startHour") ?? 9))
-        let endHour = max(startHour, min(23, call.getInt("endHour") ?? 21))
-        let eveningEnabled = call.getBool("eveningEnabled") ?? true
-        let eveningHour = max(0, min(23, call.getInt("eveningHour") ?? 20))
+        let interval = max(1, min(6, call.getInt("intervalHours", 2)))
+        let startHour = max(0, min(23, call.getInt("startHour", 9)))
+        let endHour = max(startHour, min(23, call.getInt("endHour", 21)))
+        let eveningEnabled = call.getBool("eveningEnabled", true)
+        let eveningHour = max(0, min(23, call.getInt("eveningHour", 20)))
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: hydrationIds + [eveningId])
 
@@ -111,7 +95,7 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         if eveningEnabled {
             let content = UNMutableNotificationContent()
             content.title = "Bloom · Your evening pause"
-            content.body = "Open Bloom to notice today’s small wins and save one lovely thing."
+            content.body = "Open Bloom to notice today's small wins and save one lovely thing."
             content.sound = .default
             var date = DateComponents()
             date.calendar = Calendar(identifier: .gregorian)
@@ -130,13 +114,13 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func sendTest(_ call: CAPPluginCall) {
         let content = UNMutableNotificationContent()
-        content.title = call.getString("title") ?? "Bloom"
-        content.body = call.getString("body") ?? "Your gentle reminder is working."
+        content.title = call.getString("title", "Bloom")
+        content.body = call.getString("body", "Your gentle reminder is working.")
         content.sound = .default
         let request = UNNotificationRequest(identifier: "bloom-test-\(UUID().uuidString)", content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                call.reject("Could not send the test reminder", nil, error)
+                call.reject("Could not send the test reminder", "\(error.localizedDescription)", error)
             } else {
                 call.resolve()
             }
@@ -148,11 +132,11 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("The Bloom widget app group is unavailable")
             return
         }
-        defaults.set(call.getString("name") ?? "", forKey: "name")
-        defaults.set(call.getString("date") ?? "", forKey: "date")
-        defaults.set(call.getInt("completed") ?? 0, forKey: "completed")
-        defaults.set(call.getInt("total") ?? 0, forKey: "total")
-        defaults.set(call.getInt("water") ?? 0, forKey: "water")
+        defaults.set(call.getString("name", ""), forKey: "name")
+        defaults.set(call.getString("date", ""), forKey: "date")
+        defaults.set(call.getInt("completed", 0), forKey: "completed")
+        defaults.set(call.getInt("total", 0), forKey: "total")
+        defaults.set(call.getInt("water", 0), forKey: "water")
         defaults.set(Date().timeIntervalSince1970, forKey: "updatedAt")
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
