@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, ChevronLeft, ChevronRight, Circle, Clock3, Download, Droplets, Heart, Layers3, Pause, Pencil, Play, Plus, RotateCcw, Settings2, SkipForward, Sparkles, Sun, Sunrise, Sunset, Target, Trash2, Upload, Volume2, X } from "lucide-react";
+import { ArrowRight, Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, ChevronLeft, ChevronRight, Circle, Clock3, Download, Droplets, Heart, Layers3, Moon, Pause, Pencil, Play, Plus, RotateCcw, Settings2, Share2, ShieldCheck, SkipForward, Sparkles, Sun, Sunrise, Sunset, Target, Trash2, Upload, Volume2, X } from "lucide-react";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { addDays, BloomData, cloneSeed, countWeek, currentVersion, dateKey, getOccurrence, monday, migrateLocalData, Routine, scheduled, scheduledStreak, validateImport, weekday } from "@/lib/model";
 
 type View = "today" | "week" | "goals" | "progress" | "settings";
@@ -99,7 +100,16 @@ function playDone(){
 
 let activeVibrateInterval: any = null;
 let capHaptics: any = null;
-const getCapLocalNotifications = () => (typeof window !== "undefined" ? (window as any).Capacitor?.Plugins?.LocalNotifications : null);
+
+type BloomNativePlugin = {
+  requestPermissions(): Promise<{ display: "granted" | "denied" }>;
+  scheduleReminders(options: { intervalHours: number; startHour: number; endHour: number; eveningEnabled: boolean; eveningHour: number }): Promise<{ scheduled: number }>;
+  cancelReminders(): Promise<void>;
+  sendTest(options: { title: string; body: string }): Promise<void>;
+  updateWidget(options: { name: string; date: string; completed: number; total: number; water: number }): Promise<void>;
+};
+
+const BloomNative = registerPlugin<BloomNativePlugin>("BloomNative");
 
 if (typeof window !== "undefined") {
   import("@capacitor/haptics")
@@ -387,12 +397,27 @@ export default function BloomApp(){
     return ()=>window.removeEventListener("pointerdown", unlock);
   },[]);
 
-  // Gentle notifications & periodic hydration check
+  // Native iOS reminders continue after Bloom closes. Web reminders remain active while the page is open.
   useEffect(()=>{
-    if(!data.profile.notificationsEnabled || typeof window==="undefined") return;
+    if(typeof window==="undefined") return;
+    if(Capacitor.getPlatform()==="ios"){
+      if(data.profile.notificationsEnabled){
+        BloomNative.scheduleReminders({
+          intervalHours:data.profile.waterReminderInterval||2,
+          startHour:data.profile.reminderStartHour??9,
+          endHour:data.profile.reminderEndHour??21,
+          eveningEnabled:data.profile.eveningSummaryEnabled!==false,
+          eveningHour:data.profile.eveningSummaryHour??20,
+        }).catch(()=>{});
+      }else{
+        BloomNative.cancelReminders().catch(()=>{});
+      }
+      return;
+    }
+    if(!data.profile.notificationsEnabled) return;
     const checkHydration = () => {
       const curHour=new Date().getHours();
-      if(curHour>=9 && curHour<=21){
+      if(curHour>=(data.profile.reminderStartHour??9) && curHour<=(data.profile.reminderEndHour??21)){
         const todayKey=dateKey(new Date(),data.profile.timezone);
         const waterCount=data.water?.[todayKey]||0;
         if(waterCount<8){
@@ -408,7 +433,22 @@ export default function BloomApp(){
     checkHydration();
     const intervalId=window.setInterval(checkHydration, 15*60*1000);
     return ()=>clearInterval(intervalId);
-  },[data.profile.notificationsEnabled,data.profile.waterReminderInterval,data.profile.timezone,data.water]);
+  },[data.profile.notificationsEnabled,data.profile.waterReminderInterval,data.profile.reminderStartHour,data.profile.reminderEndHour,data.profile.eveningSummaryEnabled,data.profile.eveningSummaryHour,data.profile.timezone,data.water]);
+
+  // Keep the WidgetKit snapshot current through the shared app group.
+  useEffect(()=>{
+    if(!loaded || Capacitor.getPlatform()!=="ios") return;
+    const key=dateKey(new Date(),data.profile.timezone);
+    const routines=data.routines.filter(r=>scheduled(r,key));
+    const completed=routines.filter(r=>getOccurrence(data,r.id,key)?.status==="completed").length;
+    BloomNative.updateWidget({
+      name:data.profile.name.trim(),
+      date:key,
+      completed,
+      total:routines.length,
+      water:data.water?.[key]||0,
+    }).catch(()=>{});
+  },[data,loaded]);
 
   const update = (fn:(d:BloomData)=>BloomData) => setData(d=>fn(structuredClone(d)));
 
@@ -491,20 +531,9 @@ export default function BloomApp(){
     playDrop();
     haptic(100);
 
-    // 1. Native Capacitor Local Notifications (iOS / Android app)
-    const capLocal = getCapLocalNotifications();
-    if (capLocal) {
+    if (Capacitor.getPlatform() === "ios") {
       try {
-        await capLocal.schedule({
-          notifications: [
-            {
-              title,
-              body,
-              id: Math.floor(Math.random() * 100000) + 1,
-              schedule: { at: new Date(Date.now() + 200) }
-            }
-          ]
-        });
+        await BloomNative.sendTest({ title, body });
         return;
       } catch {}
     }
@@ -539,19 +568,23 @@ export default function BloomApp(){
   const requestNotificationPermission = async () => {
     if (typeof window === "undefined") return;
 
-    // 1. Try Native Capacitor Local Notifications (iOS / Android native app)
-    const capLocal = getCapLocalNotifications();
-    if (capLocal) {
+    if (Capacitor.getPlatform() === "ios") {
       try {
-        const res = await capLocal.requestPermissions();
+        const res = await BloomNative.requestPermissions();
         if (res.display === "granted") {
           update(d => {
             if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
             d.profile.notificationsEnabled = true;
             return d;
           });
-          setMessage("Notifications enabled! You'll receive gentle sip reminders.");
-          showAppNotification("Bloom · Reminders Enabled", "Gentle hydration and routine check-ins are active 🌿");
+          setMessage("Native reminders are on. They will arrive even when Bloom is closed.");
+          await BloomNative.scheduleReminders({
+            intervalHours:data.profile.waterReminderInterval||2,
+            startHour:data.profile.reminderStartHour??9,
+            endHour:data.profile.reminderEndHour??21,
+            eveningEnabled:data.profile.eveningSummaryEnabled!==false,
+            eveningHour:data.profile.eveningSummaryHour??20,
+          });
           return;
         } else {
           update(d => { if (d.profile) d.profile.notificationsEnabled = false; return d; });
@@ -561,7 +594,7 @@ export default function BloomApp(){
       } catch {}
     }
 
-    // 2. Try Web Notifications (Browser / iOS PWA)
+    // Web Notifications for the deployed site and installed PWA.
     if ("Notification" in window) {
       try {
         const perm = await Notification.requestPermission();
@@ -582,20 +615,7 @@ export default function BloomApp(){
       } catch {}
     }
 
-    // 3. Fallback for iOS Safari (before adding to home screen)
-    update(d => {
-      if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
-      d.profile.notificationsEnabled = true;
-      return d;
-    });
-    playDrop();
-    haptic(100);
-    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    if (isIos) {
-      setMessage("Reminders enabled! Tip: On iPhone Safari, tap Share (⎋) → 'Add to Home Screen' to receive lock screen alerts.");
-    } else {
-      setMessage("In-app reminders enabled! Audio and haptic alerts will remind you to sip.");
-    }
+    setMessage("This browser cannot schedule reminders. Use the iPhone app for lock-screen alerts.");
   };
 
   const sendTestNotification = async () => {
@@ -607,14 +627,28 @@ export default function BloomApp(){
     setMessage("Test reminder sent!");
   };
 
-  const exportData = () => {
-    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const exportData = async () => {
+    const backup={...data,profile:{...data.profile,lastBackupAt:new Date().toISOString()}};
+    const blob=new Blob([JSON.stringify(backup,null,2)],{type:"application/json"});
+    const file=new File([blob],`bloom-backup-${today}.json`,{type:"application/json"});
+    if(typeof navigator.share==="function" && (!navigator.canShare || navigator.canShare({files:[file]}))){
+      try{
+        await navigator.share({title:"Bloom backup",text:"A private backup of my Bloom routines and progress.",files:[file]});
+        update(d=>{d.profile.lastBackupAt=backup.profile.lastBackupAt;return d;});
+        setMessage("Backup opened in the iPhone share sheet. Save it to Files for safekeeping.");
+        return;
+      }catch(e){
+        if(e instanceof DOMException && e.name==="AbortError") return;
+      }
+    }
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url;
-    a.download=`bloom-backup-${today}.json`;
+    a.download=file.name;
     a.click();
     URL.revokeObjectURL(url);
+    update(d=>{d.profile.lastBackupAt=backup.profile.lastBackupAt;return d;});
+    setMessage("Backup downloaded.");
   };
 
   const importData = async (file:File) => {
@@ -819,6 +853,22 @@ export default function BloomApp(){
           </div>
 
           <div className="today-aside">
+            <div className={`daily-summary-card ${localHour>=17?"evening":"preview"}`}>
+              <div className="summary-orbit"><Moon size={21}/></div>
+              <div className="daily-summary-copy">
+                <SmallLabel>{localHour>=17?"YOUR EVENING PAUSE":"TONIGHT IN BLOOM"}</SmallLabel>
+                <h3>{todayCount===dayRoutines.length&&dayRoutines.length?"A beautifully complete day.":todayCount?"Your small steps added up.":"A quiet day still counts."}</h3>
+                <p>{todayCount} of {dayRoutines.length} routines complete · {data.water?.[activeDay]||0} of 8 glasses</p>
+                <div className="summary-metrics">
+                  <span><strong>{Math.round(dayRoutines.length?todayCount/dayRoutines.length*100:0)}%</strong> rhythm</span>
+                  <span><strong>{data.occurrences.filter(o=>o.date===activeDay&&o.status==="skipped").length}</strong> gently skipped</span>
+                </div>
+                <button className="summary-link" onClick={()=>document.querySelector<HTMLTextAreaElement>(".reflection-textarea")?.focus()}>
+                  {data.notes?.[activeDay]?.trim()?"Reflection saved":"Add one lovely thing"}<ArrowRight size={14}/>
+                </button>
+              </div>
+            </div>
+
             {focus.taskId && focus.status!=="idle" ? (
               <div className="focus-card active-notice">
                 <div className="card-top"><div className="small-round"><Clock3 size={20}/></div><SmallLabel>ACTIVITY IN PROGRESS</SmallLabel></div>
@@ -1089,14 +1139,13 @@ export default function BloomApp(){
               <label>Daily social media allowance <span className="inline-field"><input type="number" min="0" max="1440" value={data.profile.allowance} onChange={e=>update(d=>{d.profile.allowance=Math.max(0,Math.min(1440,Number(e.target.value)||0));return d;})}/> minutes</span></label>
             </div>
 
-            {/* Feature 2: Browser Notifications & Reminders in Settings */}
             <div className="settings-card">
               <h2>Gentle reminders</h2>
-              <p className="settings-subnote">Browser notifications keep gentle reminders on your screen for sips and rhythm throughout the day.</p>
+              <p className="settings-subnote">The iPhone app schedules these on device, so they still arrive after Bloom is closed.</p>
               <div className="notification-toggle-box">
                 <div>
                   <strong>Hydration sip reminder</strong>
-                  <small>Gentle check-in every {data.profile.waterReminderInterval||2} hours between 9am – 9pm</small>
+                  <small>Every {data.profile.waterReminderInterval||2} hours from {data.profile.reminderStartHour??9}:00 to {data.profile.reminderEndHour??21}:00</small>
                 </div>
                 <input
                   type="checkbox"
@@ -1121,6 +1170,30 @@ export default function BloomApp(){
                   <option value={3}>Every 3 hours</option>
                 </select>
               </label>
+              <div className="reminder-window">
+                <label>Start
+                  <select value={data.profile.reminderStartHour??9} onChange={e=>update(d=>{d.profile.reminderStartHour=Number(e.target.value);return d;})}>
+                    {[7,8,9,10,11].map(h=><option value={h} key={h}>{h}:00</option>)}
+                  </select>
+                </label>
+                <label>End
+                  <select value={data.profile.reminderEndHour??21} onChange={e=>update(d=>{d.profile.reminderEndHour=Number(e.target.value);return d;})}>
+                    {[18,19,20,21,22].map(h=><option value={h} key={h}>{h}:00</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="notification-toggle-box">
+                <div>
+                  <strong>Evening reflection</strong>
+                  <small>A calm prompt at {data.profile.eveningSummaryHour??20}:00 to review the day</small>
+                </div>
+                <input type="checkbox" checked={data.profile.eveningSummaryEnabled!==false} onChange={e=>update(d=>{d.profile.eveningSummaryEnabled=e.target.checked;return d;})} aria-label="Toggle evening summary"/>
+              </div>
+              <label>Evening prompt
+                <select value={data.profile.eveningSummaryHour??20} onChange={e=>update(d=>{d.profile.eveningSummaryHour=Number(e.target.value);return d;})}>
+                  {[18,19,20,21,22].map(h=><option value={h} key={h}>{h}:00</option>)}
+                </select>
+              </label>
               <div style={{marginTop:"14px"}}>
                 <button type="button" className="outlined" onClick={sendTestNotification}>
                   <Bell size={15}/> Send test reminder
@@ -1130,12 +1203,14 @@ export default function BloomApp(){
 
             <div className="settings-card">
               <h2>Your data</h2>
-              <p>Bloom saves only in this browser on this device. It does not sync with your iPhone. Export a backup before clearing browser data.</p>
+              <p>Bloom stays private on this device. Save a backup to iCloud Drive or Files, then restore it here whenever needed.</p>
               <div className="setting-actions">
-                <button className="outlined" onClick={exportData}><Download size={17}/> Export JSON</button>
-                <button className="outlined" onClick={()=>fileRef.current?.click()}><Upload size={17}/> Import JSON</button>
+                <button className="outlined" onClick={()=>void exportData()}><Share2 size={17}/> Back up to Files</button>
+                <button className="outlined" onClick={()=>fileRef.current?.click()}><Upload size={17}/> Restore backup</button>
                 <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={e=>{const f=e.target.files?.[0];if(f)void importData(f);e.target.value="";}}/>
               </div>
+              <p className="backup-status"><ShieldCheck size={14}/>{data.profile.lastBackupAt?`Last backup ${new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(new Date(data.profile.lastBackupAt))}`:"No backup saved yet"}</p>
+              <button className="text-button" onClick={()=>update(d=>{d.profile.onboardingComplete=false;return d;})}>Run welcome setup again</button>
               <button className="danger-link" onClick={()=>{if(window.confirm("Reset Bloom? This removes all routines and progress from this browser. Export a backup first if you want to keep it.")){setData(cloneSeed());setMessage("Bloom has been reset.");}}}><Trash2 size={16}/> Reset all data</button>
             </div>
           </div>
@@ -1164,6 +1239,25 @@ export default function BloomApp(){
     <nav className="bottom-nav" aria-label="Main navigation">{nav.map(item=><button key={item.id} className={view===item.id?"active":""} onClick={()=>setView(item.id)}><item.icon size={21} strokeWidth={1.9}/><span>{item.label}</span></button>)}</nav>
 
     {modal&&<CreateModal kind={modal} onClose={()=>setModal(null)} onCreate={(title,extra)=>{update(d=>{if(modal==="routine")d.routines.push({id:uid(),title,category:"Personal",icon:"sparkle",versions:[{from:today,weekdays:[1,2,3,4,5],duration:Number(extra)||20,time:"",active:true}]});if(modal==="goal")d.goals.push({id:uid(),title,targetDate:extra||today,milestones:[]});if(modal==="course")d.courses.push({id:uid(),title,kind:"custom",lessons:[]});return d;});setModal(null);}}/>}
+    {loaded&&!data.profile.onboardingComplete&&<Onboarding
+      initialName={data.profile.name}
+      initialInterval={data.profile.waterReminderInterval||2}
+      onComplete={async ({name,interval,notifications})=>{
+        update(d=>{
+          d.profile.name=name.trim();
+          d.profile.timezone="Asia/Dubai";
+          d.profile.waterReminderInterval=interval;
+          d.profile.reminderStartHour=9;
+          d.profile.reminderEndHour=21;
+          d.profile.eveningSummaryEnabled=true;
+          d.profile.eveningSummaryHour=20;
+          d.profile.onboardingComplete=true;
+          return d;
+        });
+        if(notifications) await requestNotificationPermission();
+        setMessage("Your Bloom space is ready.");
+      }}
+    />}
     <label id="bloom-ios-haptic-label" htmlFor="bloom-ios-haptic-switch" style={{position:"fixed",opacity:0.001,pointerEvents:"none",width:"1px",height:"1px",overflow:"hidden",top:0,left:0,zIndex:-999}} aria-hidden="true">
       <input type="checkbox" id="bloom-ios-haptic-switch" {...({ switch: "" } as any)} style={{appearance:"auto"}} readOnly tabIndex={-1} />
     </label>
@@ -1172,6 +1266,66 @@ export default function BloomApp(){
 
 function Icon({name}:{name:string}){ const C=icons[name]||Sparkles; return <C size={19} strokeWidth={1.8}/>; }
 function PageHead({eyebrow,title,description}:{eyebrow:string;title:string;description:string}){ return <div className="page-head"><SmallLabel>{eyebrow}</SmallLabel><h1>{title}<span className="hero-period">.</span></h1><p>{description}</p></div>; }
+
+function Onboarding({initialName,initialInterval,onComplete}:{
+  initialName:string;
+  initialInterval:number;
+  onComplete:(value:{name:string;interval:number;notifications:boolean})=>Promise<void>;
+}){
+  const [step,setStep]=useState(0);
+  const [name,setName]=useState(initialName);
+  const [interval,setInterval]=useState(initialInterval);
+  const [notifications,setNotifications]=useState(true);
+  const [finishing,setFinishing]=useState(false);
+  const steps=["Welcome","Your rhythm","Stay gently on track"];
+  return <div className="onboarding-shell" role="dialog" aria-modal="true" aria-label="Welcome to Bloom">
+    <div className="onboarding-panel">
+      <div className="onboarding-brand"><span>b</span>bloom.</div>
+      <div className="onboarding-progress" aria-label={`Step ${step+1} of 3`}>
+        {steps.map((label,i)=><div className={i<=step?"active":""} key={label}><span>{i+1}</span><small>{label}</small></div>)}
+      </div>
+
+      {step===0&&<div className="onboarding-stage">
+        <div className="onboarding-illustration" aria-hidden="true"><span>✳</span><i/><b/></div>
+        <SmallLabel>A GENTLE SPACE FOR YOUR DAYS</SmallLabel>
+        <h1>Let life bloom at your pace.</h1>
+        <p>Routines, hydration, focus, and little wins — held together in one private space on your iPhone.</p>
+        <label>What should Bloom call you?<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Your name"/></label>
+      </div>}
+
+      {step===1&&<div className="onboarding-stage">
+        <div className="onboarding-icon"><Sunrise size={28}/></div>
+        <SmallLabel>YOUR RHYTHM</SmallLabel>
+        <h1>Small reminders, softly timed.</h1>
+        <p>Hydration reminders run from 9:00 to 21:00 Abu Dhabi time. You can change every detail later.</p>
+        <div className="onboarding-choice-grid">
+          {[1,2,3].map(hours=><button key={hours} className={interval===hours?"selected":""} onClick={()=>setInterval(hours)}><strong>Every {hours} {hours===1?"hour":"hours"}</strong><small>{hours===2?"A balanced pace":hours===1?"Frequent support":"A lighter touch"}</small></button>)}
+        </div>
+      </div>}
+
+      {step===2&&<div className="onboarding-stage">
+        <div className="onboarding-icon"><Bell size={28}/></div>
+        <SmallLabel>STAY GENTLY ON TRACK</SmallLabel>
+        <h1>Let Bloom remember for you.</h1>
+        <p>Native reminders arrive on the lock screen even when the app is closed. An evening prompt invites a short reflection at 20:00.</p>
+        <button className={`permission-choice ${notifications?"selected":""}`} onClick={()=>setNotifications(v=>!v)}>
+          <span className="choice-check">{notifications&&<Check size={15}/>}</span>
+          <span><strong>Enable iPhone reminders</strong><small>You stay in control in iOS Settings.</small></span>
+        </button>
+        <div className="privacy-note"><ShieldCheck size={17}/><span><strong>Private by design</strong>Your routines remain on this device unless you choose to export a backup.</span></div>
+      </div>}
+
+      <div className="onboarding-actions">
+        {step>0&&<button className="onboarding-back" onClick={()=>setStep(s=>s-1)}>Back</button>}
+        <button className="primary onboarding-next" disabled={finishing} onClick={async ()=>{
+          if(step<2){setStep(s=>s+1);return;}
+          setFinishing(true);
+          await onComplete({name,interval,notifications});
+        }}>{step===2?(finishing?"Preparing Bloom…":"Begin my day"):(<>Continue <ArrowRight size={16}/></>)}</button>
+      </div>
+    </div>
+  </div>;
+}
 
 function TaskCard({
   routine,

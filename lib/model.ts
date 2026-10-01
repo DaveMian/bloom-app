@@ -7,13 +7,36 @@ export type Course = { id: string; title: string; kind: "makeup" | "project" | "
 export type Milestone = { id: string; title: string; doneAt?: string };
 export type Goal = { id: string; title: string; targetDate: string; milestones: Milestone[] };
 export type Focus = { taskId: string | null; length: number; elapsed: number; startedAt: number | null; status: "idle" | "running" | "paused" | "finished" };
-export type Profile = { name: string; timezone: string; allowance: number; notificationsEnabled?: boolean; waterReminderInterval?: number };
+export type Profile = {
+  name: string;
+  timezone: string;
+  allowance: number;
+  notificationsEnabled?: boolean;
+  waterReminderInterval?: number;
+  reminderStartHour?: number;
+  reminderEndHour?: number;
+  eveningSummaryEnabled?: boolean;
+  eveningSummaryHour?: number;
+  onboardingComplete?: boolean;
+  lastBackupAt?: string;
+};
 export type BloomData = { schema: 1; seedRevision?: number; profile: Profile; routines: Routine[]; occurrences: Occurrence[]; courses: Course[]; goals: Goal[]; usage: Record<string, number>; water?: Record<string, number>; notes?: Record<string, string>; focus: Focus };
 const v = (weekdays: number[], duration: number): RoutineVersion[] => [{ from: "0001-01-01", weekdays, duration, time: "", active: true }];
 export const seed: BloomData = {
   schema: 1,
-  seedRevision: 7,
-  profile: { name: "", timezone: "Asia/Dubai", allowance: 45, notificationsEnabled: false, waterReminderInterval: 2 },
+  seedRevision: 8,
+  profile: {
+    name: "",
+    timezone: "Asia/Dubai",
+    allowance: 45,
+    notificationsEnabled: false,
+    waterReminderInterval: 2,
+    reminderStartHour: 9,
+    reminderEndHour: 21,
+    eveningSummaryEnabled: true,
+    eveningSummaryHour: 20,
+    onboardingComplete: false,
+  },
   routines: [
     { id: "reading", title: "Read for a little while", category: "Everyday", icon: "book", versions: v([0,1,2,3,4,5,6], 25) },
     { id: "scalp", title: "Scalp routine", category: "Everyday", icon: "sparkle", versions: v([0,1,2,3,4,5,6], 5) },
@@ -120,6 +143,16 @@ export function migrateLocalData(value: BloomData): BloomData {
     if (d.profile.notificationsEnabled === undefined) d.profile.notificationsEnabled = false;
     if (!d.profile.waterReminderInterval) d.profile.waterReminderInterval = 2;
     d.seedRevision = 7;
+  }
+  if ((d.seedRevision || 1) < 8) {
+    if (!d.profile.waterReminderInterval) d.profile.waterReminderInterval = 2;
+    if (d.profile.reminderStartHour === undefined) d.profile.reminderStartHour = 9;
+    if (d.profile.reminderEndHour === undefined) d.profile.reminderEndHour = 21;
+    if (d.profile.eveningSummaryEnabled === undefined) d.profile.eveningSummaryEnabled = true;
+    if (d.profile.eveningSummaryHour === undefined) d.profile.eveningSummaryHour = 20;
+    // Existing installs already have a configured space; onboarding is for fresh installs.
+    if (d.profile.onboardingComplete === undefined) d.profile.onboardingComplete = true;
+    d.seedRevision = 8;
   }
   if (!d.water) d.water = {};
   if (!d.notes) d.notes = {};
