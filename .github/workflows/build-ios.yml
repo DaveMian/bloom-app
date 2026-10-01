@@ -81,6 +81,9 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses 2>/dev/null || yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -89,6 +92,9 @@ jobs:
           arch: x86_64
           ndk: 26.1.10909125
           cmake: 3.22.1
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: 'platform-tools'
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
