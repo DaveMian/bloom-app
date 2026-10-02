@@ -120,6 +120,8 @@ type BloomNativePlugin = {
   cancelTimerNotification(): Promise<{ status: string }>;
   playAlarmSound(): Promise<{ status: string }>;
   stopAlarmSound(): Promise<{ status: string }>;
+  startAmbientSound?(options: { type: string; volume?: number }): Promise<{ status: string }>;
+  stopAmbientSound?(): Promise<{ status: string }>;
 };
 
 const BloomNative = registerPlugin<BloomNativePlugin>("BloomNative");
@@ -240,6 +242,9 @@ function playDrop(){
 
 let activeAmbientSound: { type: SoundscapeType; stop: () => void } | null = null;
 function stopAmbientSound() {
+  if (typeof window !== "undefined" && Capacitor.getPlatform() === "ios") {
+    BloomNative.stopAmbientSound?.().catch(() => {});
+  }
   if (activeAmbientSound) {
     try { activeAmbientSound.stop(); } catch {}
     activeAmbientSound = null;
@@ -253,6 +258,18 @@ function startAmbientSound(type: SoundscapeType, volume = 0.35) {
   }
   if (activeAmbientSound && activeAmbientSound.type === type) return;
   stopAmbientSound();
+
+  if (typeof window !== "undefined" && Capacitor.getPlatform() === "ios") {
+    BloomNative.startAmbientSound?.({ type, volume }).catch(() => {});
+    activeAmbientSound = {
+      type,
+      stop: () => {
+        BloomNative.stopAmbientSound?.().catch(() => {});
+      }
+    };
+    return;
+  }
+
   const ctx = getAudioContext();
   if (!ctx) return;
 

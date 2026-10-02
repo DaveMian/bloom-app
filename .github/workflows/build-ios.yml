@@ -50,9 +50,7 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/App.app Payload/
-          if [ -f ios/App/App/bloom_alarm.wav ]; then
-            cp ios/App/App/bloom_alarm.wav Payload/App.app/
-          fi
+          cp ios/App/App/*.wav Payload/App.app/ 2>/dev/null || true
           zip -r Bloom.ipa Payload
 
       - name: Upload IPA Artifact

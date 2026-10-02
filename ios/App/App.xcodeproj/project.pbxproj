@@ -19,10 +19,18 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		B10000000000000000000001 /* bloom_alarm.wav in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* bloom_alarm.wav */; };
+		B10000000000000000000003 /* calm.wav in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* calm.wav */; };
+		B10000000000000000000005 /* rain.wav in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* rain.wav */; };
+		B10000000000000000000007 /* breeze.wav in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* breeze.wav */; };
+		B10000000000000000000009 /* silence.wav in Resources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* silence.wav */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		B10000000000000000000002 /* bloom_alarm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = bloom_alarm.wav; sourceTree = "<group>"; };
+		B10000000000000000000004 /* calm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = calm.wav; sourceTree = "<group>"; };
+		B10000000000000000000006 /* rain.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = rain.wav; sourceTree = "<group>"; };
+		B10000000000000000000008 /* breeze.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = breeze.wav; sourceTree = "<group>"; };
+		B1000000000000000000000A /* silence.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silence.wav; sourceTree = "<group>"; };
 		A10000000000000000000003 /* BloomWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BloomWidget.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000005 /* BloomWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BloomWidget.entitlements; sourceTree = "<group>"; };
@@ -117,6 +125,10 @@
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 				B10000000000000000000002 /* bloom_alarm.wav */,
+				B10000000000000000000004 /* calm.wav */,
+				B10000000000000000000006 /* rain.wav */,
+				B10000000000000000000008 /* breeze.wav */,
+				B1000000000000000000000A /* silence.wav */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -236,6 +248,10 @@
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
 				B10000000000000000000001 /* bloom_alarm.wav in Resources */,
+				B10000000000000000000003 /* calm.wav in Resources */,
+				B10000000000000000000005 /* rain.wav in Resources */,
+				B10000000000000000000007 /* breeze.wav in Resources */,
+				B10000000000000000000009 /* silence.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
