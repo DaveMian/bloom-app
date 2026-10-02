@@ -35,12 +35,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 }
 
-final class BloomBridgeViewController: CAPBridgeViewController {
-    override public func capacitorDidLoad() {
-        self.bridge?.registerPluginInstance(BloomNativePlugin())
-    }
-}
-
 @objc(BloomNativePlugin)
 public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "BloomNativePlugin"
