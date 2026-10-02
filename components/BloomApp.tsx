@@ -102,8 +102,9 @@ let activeVibrateInterval: any = null;
 let capHaptics: any = null;
 
 type BloomNativePlugin = {
+  checkPermissions?(): Promise<{ display: "granted" | "denied" | "prompt" }>;
   requestPermissions(): Promise<{ display: "granted" | "denied" }>;
-  scheduleReminders(options: { intervalHours: number; startHour: number; endHour: number; eveningEnabled: boolean; eveningHour: number }): Promise<{ scheduled: number }>;
+  scheduleReminders(options: { intervalHours: number; startHour: number; endHour: number; eveningEnabled: boolean; eveningHour: number; timezone?: string }): Promise<{ scheduled: number }>;
   cancelReminders(): Promise<void>;
   sendTest(options: { title: string; body: string }): Promise<void>;
   updateWidget(options: { name: string; date: string; completed: number; total: number; water: number }): Promise<void>;
@@ -402,13 +403,17 @@ export default function BloomApp(){
     if(typeof window==="undefined") return;
     if(Capacitor.getPlatform()==="ios"){
       if(data.profile.notificationsEnabled){
+        const tz = data.profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Dubai";
         BloomNative.scheduleReminders({
           intervalHours:data.profile.waterReminderInterval||2,
           startHour:data.profile.reminderStartHour??9,
           endHour:data.profile.reminderEndHour??21,
           eveningEnabled:data.profile.eveningSummaryEnabled!==false,
           eveningHour:data.profile.eveningSummaryHour??20,
-        }).catch(()=>{});
+          timezone: tz,
+        }).catch((err)=>{
+          console.warn("Could not schedule native reminders:", err);
+        });
       }else{
         BloomNative.cancelReminders().catch(()=>{});
       }
@@ -572,26 +577,32 @@ export default function BloomApp(){
       try {
         const res = await BloomNative.requestPermissions();
         if (res.display === "granted") {
+          const tz = data.profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Dubai";
           update(d => {
-            if (!d.profile) d.profile = { name: "", timezone: "Asia/Dubai", allowance: 45 };
+            if (!d.profile) d.profile = { name: "", timezone: tz, allowance: 45 };
             d.profile.notificationsEnabled = true;
             return d;
           });
           setMessage("Native reminders are on. They will arrive even when Bloom is closed.");
           await BloomNative.scheduleReminders({
-            intervalHours:data.profile.waterReminderInterval||2,
-            startHour:data.profile.reminderStartHour??9,
-            endHour:data.profile.reminderEndHour??21,
-            eveningEnabled:data.profile.eveningSummaryEnabled!==false,
-            eveningHour:data.profile.eveningSummaryHour??20,
+            intervalHours: data.profile.waterReminderInterval || 2,
+            startHour: data.profile.reminderStartHour ?? 9,
+            endHour: data.profile.reminderEndHour ?? 21,
+            eveningEnabled: data.profile.eveningSummaryEnabled !== false,
+            eveningHour: data.profile.eveningSummaryHour ?? 20,
+            timezone: tz,
           });
           return;
         } else {
           update(d => { if (d.profile) d.profile.notificationsEnabled = false; return d; });
-          setMessage("Notification permission was denied in your device Settings.");
+          setMessage("Notification permission was denied. Please allow notifications for Bloom in iPhone Settings.");
           return;
         }
-      } catch {}
+      } catch (err: any) {
+        console.error("BloomNative requestPermissions failed:", err);
+        setMessage("Could not activate iOS reminders: " + (err?.message || "Please check iPhone Settings > Notifications > Bloom."));
+        return;
+      }
     }
 
     // Web Notifications for the deployed site and installed PWA.

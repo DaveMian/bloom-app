@@ -16,7 +16,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .sound, .badge, .list])
+        } else {
+            completionHandler([.alert, .sound, .badge])
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        completionHandler()
     }
 
     func applicationWillResignActive(_ application: UIApplication) {}
@@ -35,11 +45,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 }
 
+@objc(ViewController)
+public class ViewController: CAPBridgeViewController {
+    override public func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        bridge?.registerPluginInstance(BloomNativePlugin())
+    }
+}
+
 @objc(BloomNativePlugin)
 public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "BloomNativePlugin"
     public let jsName = "BloomNative"
     public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "scheduleReminders", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelReminders", returnType: CAPPluginReturnPromise),
@@ -50,6 +69,23 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
     private let hydrationIds = (0...23).map { "bloom-hydration-\($0)" }
     private let eveningId = "bloom-evening-summary"
     private let suiteName = "group.app.bloom.routine"
+
+    @objc public override func checkPermissions(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let status: String
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                status = "granted"
+            case .denied:
+                status = "denied"
+            case .notDetermined:
+                status = "prompt"
+            @unknown default:
+                status = "prompt"
+            }
+            call.resolve(["display": status])
+        }
+    }
 
     @objc public override func requestPermissions(_ call: CAPPluginCall) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -67,6 +103,8 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         let endHour = max(startHour, min(23, call.getInt("endHour", 21)))
         let eveningEnabled = call.getBool("eveningEnabled", true)
         let eveningHour = max(0, min(23, call.getInt("eveningHour", 20)))
+        let tzIdentifier = call.getString("timezone", "")
+        let timeZone = (!tzIdentifier.isEmpty ? TimeZone(identifier: tzIdentifier) : nil) ?? TimeZone.current
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: hydrationIds + [eveningId])
 
@@ -79,8 +117,9 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
             content.sound = .default
             var date = DateComponents()
             date.calendar = Calendar(identifier: .gregorian)
-            date.timeZone = TimeZone(identifier: "Asia/Dubai")
+            date.timeZone = timeZone
             date.hour = hour
+            date.minute = 0
             center.add(UNNotificationRequest(identifier: "bloom-hydration-\(hour)", content: content, trigger: UNCalendarNotificationTrigger(dateMatching: date, repeats: true)))
             scheduled += 1
             hour += interval
@@ -93,8 +132,9 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
             content.sound = .default
             var date = DateComponents()
             date.calendar = Calendar(identifier: .gregorian)
-            date.timeZone = TimeZone(identifier: "Asia/Dubai")
+            date.timeZone = timeZone
             date.hour = eveningHour
+            date.minute = 0
             center.add(UNNotificationRequest(identifier: eveningId, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: date, repeats: true)))
             scheduled += 1
         }
