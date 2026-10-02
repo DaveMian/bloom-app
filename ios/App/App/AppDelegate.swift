@@ -37,7 +37,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
 final class BloomBridgeViewController: CAPBridgeViewController {
     override public func capacitorDidLoad() {
-        bridge?.registerPluginInstance(BloomNativePlugin())
+        self.bridge?.registerPluginInstance(BloomNativePlugin())
     }
 }
 
@@ -57,10 +57,10 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
     private let eveningId = "bloom-evening-summary"
     private let suiteName = "group.app.bloom.routine"
 
-    @objc override func requestPermissions(_ call: CAPPluginCall) {
+    @objc public override func requestPermissions(_ call: CAPPluginCall) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if let error = error {
-                call.reject("Could not request notification permission", "\(error.localizedDescription)", error)
+                call.resolve(["display": "error", "message": error.localizedDescription])
                 return
             }
             call.resolve(["display": granted ? "granted" : "denied"])
@@ -95,7 +95,7 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         if eveningEnabled {
             let content = UNMutableNotificationContent()
             content.title = "Bloom · Your evening pause"
-            content.body = "Open Bloom to notice today's small wins and save one lovely thing."
+            content.body = "Open Bloom to notice today’s small wins and save one lovely thing."
             content.sound = .default
             var date = DateComponents()
             date.calendar = Calendar(identifier: .gregorian)
@@ -120,16 +120,16 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         let request = UNNotificationRequest(identifier: "bloom-test-\(UUID().uuidString)", content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                call.reject("Could not send the test reminder", "\(error.localizedDescription)", error)
+                call.resolve(["error": error.localizedDescription])
             } else {
-                call.resolve()
+                call.resolve(["status": "sent"])
             }
         }
     }
 
     @objc func updateWidget(_ call: CAPPluginCall) {
         guard let defaults = UserDefaults(suiteName: suiteName) else {
-            call.reject("The Bloom widget app group is unavailable")
+            call.resolve(["error": "The Bloom widget app group is unavailable"])
             return
         }
         defaults.set(call.getString("name", ""), forKey: "name")
@@ -141,6 +141,6 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
         }
-        call.resolve()
+        call.resolve(["status": "updated"])
     }
 }
