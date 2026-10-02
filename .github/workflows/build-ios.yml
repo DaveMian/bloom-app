@@ -8,7 +8,7 @@ on:
 jobs:
   build-ios:
     name: Build iOS IPA
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,7 +31,9 @@ jobs:
         run: pnpm build
 
       - name: Sync Capacitor iOS
-        run: npx cap sync ios
+        run: |
+          npx cap sync ios
+          node scripts/register-plugin.js
 
       - name: Build iOS Application (.app)
         run: |
