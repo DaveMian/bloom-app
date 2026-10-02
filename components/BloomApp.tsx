@@ -104,10 +104,20 @@ let capHaptics: any = null;
 type BloomNativePlugin = {
   checkPermissions?(): Promise<{ display: "granted" | "denied" | "prompt" }>;
   requestPermissions(): Promise<{ display: "granted" | "denied" }>;
-  scheduleReminders(options: { intervalHours: number; startHour: number; endHour: number; eveningEnabled: boolean; eveningHour: number; timezone?: string }): Promise<{ scheduled: number }>;
+  scheduleReminders(options: {
+    intervalHours: number;
+    startHour: number;
+    endHour: number;
+    eveningEnabled: boolean;
+    eveningHour: number;
+    timezone?: string;
+    routinesJson?: string;
+  }): Promise<{ scheduled: number }>;
   cancelReminders(): Promise<void>;
   sendTest(options: { title: string; body: string }): Promise<void>;
   updateWidget(options: { name: string; date: string; completed: number; total: number; water: number }): Promise<void>;
+  scheduleTimerNotification(options: { seconds: number; title: string; body: string }): Promise<{ status: string; seconds?: number }>;
+  cancelTimerNotification(): Promise<{ status: string }>;
 };
 
 const BloomNative = registerPlugin<BloomNativePlugin>("BloomNative");
@@ -383,11 +393,33 @@ export default function BloomApp(){
   const focusElapsed = focus.elapsed+(focus.status==="running"&&focus.startedAt?Math.max(0,Math.floor((now-focus.startedAt)/1000)):0);
   const focusLeft = Math.max(0,focus.length-focusElapsed);
 
+  const scheduleNativeTimer = (seconds: number, taskTitle?: string) => {
+    if (typeof window === "undefined" || Capacitor.getPlatform() !== "ios") return;
+    const title = taskTitle ? `Bloom · ${taskTitle} complete` : "Bloom · Focus complete";
+    const body = taskTitle 
+      ? `Great job on ${taskTitle}! Time to mark it complete.` 
+      : "Time's up! Great session. Open Bloom to mark your progress.";
+    BloomNative.scheduleTimerNotification({ seconds, title, body }).catch(err => {
+      console.warn("Could not schedule native timer completion notification:", err);
+    });
+  };
+
+  const cancelNativeTimer = () => {
+    if (typeof window === "undefined" || Capacitor.getPlatform() !== "ios") return;
+    BloomNative.cancelTimerNotification().catch(() => {});
+  };
+
   useEffect(()=>{
     if(focus.status==="running" && focusElapsed>=focus.length){
       stopAmbientSound();
       playDone();
       haptic();
+      cancelNativeTimer();
+      const r = focus.taskId ? data.routines.find(x => x.id === focus.taskId) : null;
+      const title = r ? `Bloom · ${r.title} complete` : "Bloom · Focus complete";
+      if (Capacitor.getPlatform() !== "ios") {
+        showAppNotification(title, "Time's up! Great session. Open Bloom to mark your progress.");
+      }
       setData(d=>({...d,focus:{...d.focus,status:"finished",elapsed:d.focus.length,startedAt:null}}));
     }
   },[focus.status,focus.length,focusElapsed]);
@@ -404,6 +436,20 @@ export default function BloomApp(){
     if(Capacitor.getPlatform()==="ios"){
       if(data.profile.notificationsEnabled){
         const tz = data.profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Dubai";
+        const routineReminders = data.routines.flatMap(r => {
+          const v = currentVersion(r, today);
+          if (!v || !v.active || !v.time) return [];
+          const [hStr, mStr] = v.time.split(":");
+          const hour = parseInt(hStr, 10);
+          const minute = parseInt(mStr, 10);
+          if (isNaN(hour) || isNaN(minute)) return [];
+          return [{
+            title: r.title,
+            hour,
+            minute,
+            weekdays: v.weekdays || []
+          }];
+        });
         BloomNative.scheduleReminders({
           intervalHours:data.profile.waterReminderInterval||2,
           startHour:data.profile.reminderStartHour??9,
@@ -411,6 +457,7 @@ export default function BloomApp(){
           eveningEnabled:data.profile.eveningSummaryEnabled!==false,
           eveningHour:data.profile.eveningSummaryHour??20,
           timezone: tz,
+          routinesJson: JSON.stringify(routineReminders),
         }).catch((err)=>{
           console.warn("Could not schedule native reminders:", err);
         });
@@ -438,7 +485,7 @@ export default function BloomApp(){
     checkHydration();
     const intervalId=window.setInterval(checkHydration, 15*60*1000);
     return ()=>clearInterval(intervalId);
-  },[data.profile.notificationsEnabled,data.profile.waterReminderInterval,data.profile.reminderStartHour,data.profile.reminderEndHour,data.profile.eveningSummaryEnabled,data.profile.eveningSummaryHour,data.profile.timezone,data.water]);
+  },[data.profile.notificationsEnabled,data.profile.waterReminderInterval,data.profile.reminderStartHour,data.profile.reminderEndHour,data.profile.eveningSummaryEnabled,data.profile.eveningSummaryHour,data.profile.timezone,data.routines,data.water,today]);
 
   // Keep the WidgetKit snapshot current through the shared app group.
   useEffect(()=>{
@@ -460,6 +507,9 @@ export default function BloomApp(){
   const setStatus = (id:string,key:string,status:"completed"|"skipped"|null) => {
     if(status==="completed"){ playDone(); haptic(400); }
     else{ stopHaptic(); }
+    if(data.focus.taskId===id && (status==="completed" || status==="skipped")){
+      cancelNativeTimer();
+    }
     update(d=>{
       d.occurrences=d.occurrences.filter(x=>!(x.routineId===id&&x.date===key));
       if(status) d.occurrences.push({routineId:id,date:key,status,...(status==="completed"?{completedAt:new Date().toISOString()}:{})});
@@ -467,8 +517,21 @@ export default function BloomApp(){
         if(status==="completed"&&(!d.water?.[key]||d.water[key]<8)){ if(!d.water)d.water={}; d.water[key]=8; }
         else if(status===null&&(d.water?.[key]||0)>=8){ if(d.water)d.water[key]=0; }
       }
+      if(d.focus.taskId===id && (status==="completed" || status==="skipped")){
+        d.focus={taskId:null,length:20*60,elapsed:0,startedAt:null,status:"idle"};
+      }
       return d;
     });
+    if(status==="completed" && key===today){
+      const dayScheduled=data.routines.filter(r=>scheduled(r,key));
+      const doneCount=dayScheduled.filter(r=>{
+        const occ=getOccurrence(data,r.id,key);
+        return r.id===id || occ?.status==="completed";
+      }).length;
+      if(dayScheduled.length>0 && doneCount===dayScheduled.length){
+        showAppNotification("🌸 Bloom · Day Complete!", "You finished all your planned routines for today. Beautiful work!");
+      }
+    }
   };
 
   const logWater = (key:string,count:number) => {
@@ -510,10 +573,15 @@ export default function BloomApp(){
     if(action==="start"){
       getAudioContext();
       if(soundscape!=="none") startAmbientSound(soundscape);
+      const remainingSeconds = Math.max(1, focus.length - focusElapsed);
+      const r = focus.taskId ? data.routines.find(x => x.id === focus.taskId) : null;
+      const taskName = r ? r.title : (focus.taskId === "water" ? "Hydration" : "Focus session");
+      scheduleNativeTimer(remainingSeconds, taskName);
     }
     if(action==="pause" || action==="cancel"){
       stopAmbientSound();
       if(action==="cancel") stopHaptic();
+      cancelNativeTimer();
     }
     update(d=>{
       const f=d.focus;
@@ -526,8 +594,12 @@ export default function BloomApp(){
   const startFocus = (id:string|null,length:number) => {
     getAudioContext();
     if(soundscape!=="none") startAmbientSound(soundscape);
+    const durationSeconds = Math.max(1, Math.round(length * 60));
+    const r = id ? data.routines.find(x => x.id === id) : null;
+    const taskName = r ? r.title : (id === "water" ? "Hydration" : "Focus session");
+    scheduleNativeTimer(durationSeconds, taskName);
     update(d=>{
-      d.focus={taskId:id,length:length*60,elapsed:0,startedAt:Date.now(),status:"running"};
+      d.focus={taskId:id,length:durationSeconds,elapsed:0,startedAt:Date.now(),status:"running"};
       return d;
     });
   };
@@ -583,7 +655,20 @@ export default function BloomApp(){
             d.profile.notificationsEnabled = true;
             return d;
           });
-          setMessage("Native reminders are on. They will arrive even when Bloom is closed.");
+          const routineReminders = data.routines.flatMap(r => {
+            const v = currentVersion(r, today);
+            if (!v || !v.active || !v.time) return [];
+            const [hStr, mStr] = v.time.split(":");
+            const hour = parseInt(hStr, 10);
+            const minute = parseInt(mStr, 10);
+            if (isNaN(hour) || isNaN(minute)) return [];
+            return [{
+              title: r.title,
+              hour,
+              minute,
+              weekdays: v.weekdays || []
+            }];
+          });
           await BloomNative.scheduleReminders({
             intervalHours: data.profile.waterReminderInterval || 2,
             startHour: data.profile.reminderStartHour ?? 9,
@@ -591,6 +676,7 @@ export default function BloomApp(){
             eveningEnabled: data.profile.eveningSummaryEnabled !== false,
             eveningHour: data.profile.eveningSummaryHour ?? 20,
             timezone: tz,
+            routinesJson: JSON.stringify(routineReminders),
           });
           return;
         } else {

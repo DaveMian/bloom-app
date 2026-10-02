@@ -55,11 +55,14 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "scheduleReminders", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelReminders", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendTest", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "updateWidget", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "updateWidget", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "scheduleTimerNotification", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancelTimerNotification", returnType: CAPPluginReturnPromise)
     ]
 
     private let hydrationIds = (0...23).map { "bloom-hydration-\($0)" }
     private let eveningId = "bloom-evening-summary"
+    private let timerNotificationId = "bloom-timer-completion"
     private let suiteName = "group.app.bloom.routine"
 
     @objc public override func checkPermissions(_ call: CAPPluginCall) {
@@ -130,12 +133,102 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
             center.add(UNNotificationRequest(identifier: eveningId, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: date, repeats: true)))
             scheduled += 1
         }
+
+        if let jsonString = call.getString("routinesJson"),
+           let data = jsonString.data(using: .utf8),
+           let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            for (idx, item) in list.prefix(40).enumerated() {
+                guard let title = item["title"] as? String,
+                      let hour = item["hour"] as? Int,
+                      let minute = item["minute"] as? Int,
+                      let weekdays = item["weekdays"] as? [Int] else { continue }
+                for wd in weekdays {
+                    let content = UNMutableNotificationContent()
+                    content.title = "Bloom · \(title)"
+                    content.body = "Time for your scheduled routine: \(title)"
+                    content.sound = .default
+                    var date = DateComponents()
+                    date.calendar = Calendar(identifier: .gregorian)
+                    date.timeZone = timeZone
+                    date.weekday = wd + 1
+                    date.hour = hour
+                    date.minute = minute
+                    let reqId = "bloom-routine-\(idx)-\(wd)"
+                    center.add(UNNotificationRequest(identifier: reqId, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: date, repeats: true)))
+                    scheduled += 1
+                }
+            }
+        }
         call.resolve(["scheduled": scheduled])
     }
 
     @objc func cancelReminders(_ call: CAPPluginCall) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: hydrationIds + [eveningId])
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: hydrationIds + [eveningId])
+        center.getPendingNotificationRequests { requests in
+            let oldRoutineIds = requests.filter { $0.identifier.hasPrefix("bloom-routine-") }.map { $0.identifier }
+            if !oldRoutineIds.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: oldRoutineIds)
+            }
+        }
         call.resolve()
+    }
+
+    private func addTimerRequest(seconds: Double, title: String, body: String, call: CAPPluginCall) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: seconds, repeats: false)
+        let request = UNNotificationRequest(identifier: self.timerNotificationId, content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                call.reject("Failed to schedule timer notification: \(error.localizedDescription)")
+            } else {
+                call.resolve(["status": "scheduled", "seconds": seconds])
+            }
+        }
+    }
+
+    @objc func scheduleTimerNotification(_ call: CAPPluginCall) {
+        let seconds = call.getDouble("seconds", 0)
+        let title = call.getString("title", "Bloom · Timer complete")
+        let body = call.getString("body", "Great session! Open Bloom to mark it complete.")
+
+        guard seconds > 0 else {
+            call.reject("Timer duration must be greater than 0 seconds")
+            return
+        }
+
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [self.timerNotificationId])
+
+        center.getNotificationSettings { [weak self] settings in
+            guard let self = self else { return }
+            if settings.authorizationStatus == .notDetermined {
+                center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+                    if granted {
+                        self.addTimerRequest(seconds: seconds, title: title, body: body, call: call)
+                    } else {
+                        call.resolve(["status": "permission_denied"])
+                    }
+                }
+            } else if settings.authorizationStatus == .denied {
+                call.resolve(["status": "permission_denied"])
+            } else {
+                self.addTimerRequest(seconds: seconds, title: title, body: body, call: call)
+            }
+        }
+    }
+
+    @objc func cancelTimerNotification(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [timerNotificationId])
+        call.resolve(["status": "cancelled"])
     }
 
     @objc func sendTest(_ call: CAPPluginCall) {
