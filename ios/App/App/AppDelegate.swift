@@ -2,6 +2,7 @@ import UIKit
 import Capacitor
 import UserNotifications
 import WidgetKit
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -10,7 +11,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        setupAlarmSound()
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            print("AVAudioSession setup error: \(error)")
+        }
         return true
+    }
+
+    private func setupAlarmSound() {
+        let fileManager = FileManager.default
+        guard let libraryDir = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first else { return }
+        let soundsDir = libraryDir.appendingPathComponent("Sounds")
+        try? fileManager.createDirectory(at: soundsDir, withIntermediateDirectories: true)
+        let destUrl = soundsDir.appendingPathComponent("bloom_alarm.wav")
+        if !fileManager.fileExists(atPath: destUrl.path) {
+            if let sourceUrl = Bundle.main.url(forResource: "bloom_alarm", withExtension: "wav") ??
+                               Bundle.main.url(forResource: "public/bloom_alarm", withExtension: "wav") {
+                try? fileManager.copyItem(at: sourceUrl, to: destUrl)
+            }
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -57,7 +80,9 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "sendTest", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateWidget", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "scheduleTimerNotification", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "cancelTimerNotification", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "cancelTimerNotification", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "playAlarmSound", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopAlarmSound", returnType: CAPPluginReturnPromise)
     ]
 
     private let hydrationIds = (0...23).map { "bloom-hydration-\($0)" }
@@ -174,11 +199,22 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve()
     }
 
+    private var alarmPlayer: AVAudioPlayer?
+
     private func addTimerRequest(seconds: Double, title: String, body: String, call: CAPPluginCall) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+
+        let soundUrl = Bundle.main.url(forResource: "bloom_alarm", withExtension: "wav") ??
+                       Bundle.main.url(forResource: "public/bloom_alarm", withExtension: "wav")
+        let soundsDirExists = FileManager.default.fileExists(atPath: FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.appendingPathComponent("Sounds/bloom_alarm.wav").path ?? "")
+        if soundUrl != nil || soundsDirExists {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("bloom_alarm.wav"))
+        } else {
+            content.sound = .default
+        }
+
         if #available(iOS 15.0, *) {
             content.interruptionLevel = .timeSensitive
         }
@@ -193,6 +229,31 @@ public class BloomNativePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve(["status": "scheduled", "seconds": seconds])
             }
         }
+    }
+
+    @objc func playAlarmSound(_ call: CAPPluginCall) {
+        let soundUrl = Bundle.main.url(forResource: "bloom_alarm", withExtension: "wav") ??
+                       Bundle.main.url(forResource: "public/bloom_alarm", withExtension: "wav") ??
+                       FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.appendingPathComponent("Sounds/bloom_alarm.wav")
+        if let soundUrl = soundUrl {
+            do {
+                alarmPlayer = try AVAudioPlayer(contentsOf: soundUrl)
+                alarmPlayer?.prepareToPlay()
+                alarmPlayer?.play()
+                call.resolve(["status": "playing"])
+                return
+            } catch {
+                call.reject("Audio error: \(error.localizedDescription)")
+                return
+            }
+        }
+        call.resolve(["status": "file_not_found"])
+    }
+
+    @objc func stopAlarmSound(_ call: CAPPluginCall) {
+        alarmPlayer?.stop()
+        alarmPlayer = nil
+        call.resolve(["status": "stopped"])
     }
 
     @objc func scheduleTimerNotification(_ call: CAPPluginCall) {

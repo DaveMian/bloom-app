@@ -18,9 +18,11 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		B10000000000000000000001 /* bloom_alarm.wav in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* bloom_alarm.wav */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B10000000000000000000002 /* bloom_alarm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = bloom_alarm.wav; sourceTree = "<group>"; };
 		A10000000000000000000003 /* BloomWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BloomWidget.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000005 /* BloomWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BloomWidget.entitlements; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 				A10000000000000000000018 /* App.entitlements */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				B10000000000000000000002 /* bloom_alarm.wav */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -232,6 +235,7 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				B10000000000000000000001 /* bloom_alarm.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

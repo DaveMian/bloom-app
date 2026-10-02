@@ -118,6 +118,8 @@ type BloomNativePlugin = {
   updateWidget(options: { name: string; date: string; completed: number; total: number; water: number }): Promise<void>;
   scheduleTimerNotification(options: { seconds: number; title: string; body: string }): Promise<{ status: string; seconds?: number }>;
   cancelTimerNotification(): Promise<{ status: string }>;
+  playAlarmSound(): Promise<{ status: string }>;
+  stopAlarmSound(): Promise<{ status: string }>;
 };
 
 const BloomNative = registerPlugin<BloomNativePlugin>("BloomNative");
@@ -243,7 +245,8 @@ function stopAmbientSound() {
     activeAmbientSound = null;
   }
 }
-function startAmbientSound(type: SoundscapeType, volume = 0.28) {
+
+function startAmbientSound(type: SoundscapeType, volume = 0.35) {
   if (type === "none") {
     stopAmbientSound();
     return;
@@ -252,88 +255,143 @@ function startAmbientSound(type: SoundscapeType, volume = 0.28) {
   stopAmbientSound();
   const ctx = getAudioContext();
   if (!ctx) return;
-  try {
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.001, ctx.currentTime);
-    masterGain.gain.exponentialRampToValueAtTime(volume, ctx.currentTime + 1.2);
-    masterGain.connect(ctx.destination);
 
-    if (type === "calm") {
-      const o1 = ctx.createOscillator();
-      const o2 = ctx.createOscillator();
-      const g1 = ctx.createGain();
-      const g2 = ctx.createGain();
-      o1.type = "sine";
-      o2.type = "sine";
-      o1.frequency.setValueAtTime(216, ctx.currentTime);
-      o2.frequency.setValueAtTime(216.7, ctx.currentTime);
-      g1.gain.setValueAtTime(0.2, ctx.currentTime);
-      g2.gain.setValueAtTime(0.2, ctx.currentTime);
-      o1.connect(g1); g1.connect(masterGain);
-      o2.connect(g2); g2.connect(masterGain);
-      o1.start(); o2.start();
-      activeAmbientSound = {
-        type,
-        stop: () => {
-          try {
-            masterGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
-            setTimeout(() => { o1.stop(); o2.stop(); o1.disconnect(); o2.disconnect(); masterGain.disconnect(); }, 700);
-          } catch {}
-        }
-      };
-    } else {
-      const bufferSize = ctx.sampleRate * 2;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      let lastOut = 0.0;
-      for (let i = 0; i < bufferSize; i++) {
-        const white = Math.random() * 2 - 1;
-        if (type === "rain") {
-          lastOut = (lastOut + (0.02 * white)) / 1.02;
-          data[i] = lastOut * 3.2;
-        } else {
-          lastOut = (lastOut + (0.015 * white)) / 1.015;
-          data[i] = lastOut * 4.0;
-        }
-      }
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      noise.loop = true;
+  const playSoundscape = () => {
+    try {
+      const now = ctx.currentTime;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.01, now);
+      masterGain.gain.linearRampToValueAtTime(volume, now + 0.5);
+      masterGain.connect(ctx.destination);
 
-      const filter = ctx.createBiquadFilter();
-      let lfo: OscillatorNode | null = null;
-      if (type === "rain") {
+      if (type === "calm") {
+        // Singing bowl resonance with audible harmonics for phone speakers
+        const freqs = [396, 528, 639];
+        const oscs: OscillatorNode[] = [];
+        freqs.forEach((f, idx) => {
+          const osc = ctx.createOscillator();
+          const g = ctx.createGain();
+          osc.type = idx === 0 ? "triangle" : "sine";
+          osc.frequency.setValueAtTime(f, now);
+          if (idx === 1) osc.frequency.setValueAtTime(f + 0.6, now);
+          g.gain.setValueAtTime(idx === 0 ? 0.28 : 0.16, now);
+          osc.connect(g);
+          g.connect(masterGain);
+          osc.start(now);
+          oscs.push(osc);
+        });
+
+        activeAmbientSound = {
+          type,
+          stop: () => {
+            try {
+              const stopNow = ctx.currentTime;
+              masterGain.gain.linearRampToValueAtTime(0.001, stopNow + 0.3);
+              setTimeout(() => {
+                oscs.forEach(o => { try { o.stop(); o.disconnect(); } catch {} });
+                masterGain.disconnect();
+              }, 350);
+            } catch {}
+          }
+        };
+      } else if (type === "rain") {
+        // Crisp soothing rainfall: pink noise centered at 1200Hz so it cuts through iPhone speakers
+        const bufferSize = Math.floor(ctx.sampleRate * 2.5);
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.0555179;
+          b1 = 0.99332 * b1 + white * 0.0750759;
+          b2 = 0.96900 * b2 + white * 0.1538520;
+          b3 = 0.86650 * b3 + white * 0.3104856;
+          b4 = 0.55000 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.0168980;
+          data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.22;
+          b6 = white * 0.115926;
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        noise.loop = true;
+
+        const filter = ctx.createBiquadFilter();
         filter.type = "bandpass";
-        filter.frequency.setValueAtTime(950, ctx.currentTime);
-        filter.Q.setValueAtTime(0.4, ctx.currentTime);
+        filter.frequency.setValueAtTime(1200, now);
+        filter.Q.setValueAtTime(0.7, now);
+
+        noise.connect(filter);
+        filter.connect(masterGain);
+        noise.start(now);
+
+        activeAmbientSound = {
+          type,
+          stop: () => {
+            try {
+              const stopNow = ctx.currentTime;
+              masterGain.gain.linearRampToValueAtTime(0.001, stopNow + 0.3);
+              setTimeout(() => {
+                try { noise.stop(); noise.disconnect(); masterGain.disconnect(); } catch {}
+              }, 350);
+            } catch {}
+          }
+        };
       } else {
+        // "breeze": gentle low-pass wind with relaxing slow pitch modulation
+        const bufferSize = Math.floor(ctx.sampleRate * 2.5);
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let lastOut = 0.0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          lastOut = (lastOut + (0.08 * white)) / 1.08;
+          data[i] = lastOut * 1.8;
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        noise.loop = true;
+
+        const filter = ctx.createBiquadFilter();
         filter.type = "lowpass";
-        filter.frequency.setValueAtTime(300, ctx.currentTime);
-        lfo = ctx.createOscillator();
+        filter.frequency.setValueAtTime(500, now);
+        filter.Q.setValueAtTime(2.2, now);
+
+        const lfo = ctx.createOscillator();
         const lfoGain = ctx.createGain();
         lfo.type = "sine";
-        lfo.frequency.setValueAtTime(0.12, ctx.currentTime);
-        lfoGain.gain.setValueAtTime(160, ctx.currentTime);
+        lfo.frequency.setValueAtTime(0.18, now);
+        lfoGain.gain.setValueAtTime(240, now);
         lfo.connect(lfoGain);
         lfoGain.connect(filter.frequency);
-        lfo.start();
-      }
+        lfo.start(now);
 
-      noise.connect(filter);
-      filter.connect(masterGain);
-      noise.start();
-      activeAmbientSound = {
-        type,
-        stop: () => {
-          try {
-            masterGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
-            if (lfo) { try { lfo.stop(); lfo.disconnect(); } catch {} }
-            setTimeout(() => { noise.stop(); noise.disconnect(); masterGain.disconnect(); }, 700);
-          } catch {}
-        }
-      };
+        noise.connect(filter);
+        filter.connect(masterGain);
+        noise.start(now);
+
+        activeAmbientSound = {
+          type,
+          stop: () => {
+            try {
+              const stopNow = ctx.currentTime;
+              masterGain.gain.linearRampToValueAtTime(0.001, stopNow + 0.3);
+              setTimeout(() => {
+                try { lfo.stop(); lfo.disconnect(); noise.stop(); noise.disconnect(); masterGain.disconnect(); } catch {}
+              }, 350);
+            } catch {}
+          }
+        };
+      }
+    } catch (e) {
+      console.warn("Ambient sound error:", e);
     }
-  } catch {}
+  };
+
+  if (ctx.state === "suspended") {
+    ctx.resume().then(playSoundscape).catch(playSoundscape);
+  } else {
+    playSoundscape();
+  }
 }
 
 export default function BloomApp(){
@@ -413,8 +471,11 @@ export default function BloomApp(){
     if(focus.status==="running" && focusElapsed>=focus.length){
       stopAmbientSound();
       playDone();
-      haptic();
+      haptic(5000);
       cancelNativeTimer();
+      if (Capacitor.getPlatform() === "ios") {
+        BloomNative.playAlarmSound().catch(() => {});
+      }
       const r = focus.taskId ? data.routines.find(x => x.id === focus.taskId) : null;
       const title = r ? `Bloom · ${r.title} complete` : "Bloom · Focus complete";
       if (Capacitor.getPlatform() !== "ios") {
@@ -425,9 +486,20 @@ export default function BloomApp(){
   },[focus.status,focus.length,focusElapsed]);
 
   useEffect(()=>{
-    const unlock=()=>{ getAudioContext(); };
+    const unlock=()=>{
+      const ctx = getAudioContext();
+      if (ctx && ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+    };
     window.addEventListener("pointerdown", unlock, { passive: true });
-    return ()=>window.removeEventListener("pointerdown", unlock);
+    window.addEventListener("touchstart", unlock, { passive: true });
+    window.addEventListener("touchend", unlock, { passive: true });
+    return ()=>{
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("touchstart", unlock);
+      window.removeEventListener("touchend", unlock);
+    };
   },[]);
 
   // Native iOS reminders continue after Bloom closes. Web reminders remain active while the page is open.
@@ -509,6 +581,8 @@ export default function BloomApp(){
     else{ stopHaptic(); }
     if(data.focus.taskId===id && (status==="completed" || status==="skipped")){
       cancelNativeTimer();
+      stopAmbientSound();
+      if(Capacitor.getPlatform()==="ios") BloomNative.stopAlarmSound().catch(()=>{});
     }
     update(d=>{
       d.occurrences=d.occurrences.filter(x=>!(x.routineId===id&&x.date===key));
@@ -563,9 +637,10 @@ export default function BloomApp(){
 
   const handleSoundscapeChange = (snd: SoundscapeType) => {
     setSoundscape(snd);
-    if(focus.status==="running"){
-      if(snd==="none") stopAmbientSound();
-      else startAmbientSound(snd);
+    if(snd==="none"){
+      stopAmbientSound();
+    } else {
+      startAmbientSound(snd);
     }
   };
 
@@ -580,7 +655,10 @@ export default function BloomApp(){
     }
     if(action==="pause" || action==="cancel"){
       stopAmbientSound();
-      if(action==="cancel") stopHaptic();
+      if(action==="cancel"){
+        stopHaptic();
+        if(Capacitor.getPlatform()==="ios") BloomNative.stopAlarmSound().catch(()=>{});
+      }
       cancelNativeTimer();
     }
     update(d=>{
